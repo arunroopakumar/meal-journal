@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useReducer, useEffect, useRef } from 'react';
 import { NutritionInfo, MealFoodItem } from '../models/FoodItem';
 import { Meal, MealType, DailyLog, aggregateNutrition, MEAL_TYPE_ORDER } from '../models/Meal';
 import { UserProfile } from '../models/UserProfile';
@@ -92,6 +92,7 @@ interface MealContextType {
   deleteMeal: (mealId: string) => Promise<void>;
   refreshSuggestions: () => void;
   completeOnboarding: (profile: UserProfile) => Promise<void>;
+  reloadToday: () => Promise<void>;
 }
 
 const MealContext = createContext<MealContextType | undefined>(undefined);
@@ -100,6 +101,19 @@ const MealContext = createContext<MealContextType | undefined>(undefined);
 
 export function MealProvider({ children }: { children: React.ReactNode }) {
   const [state, dispatch] = useReducer(mealReducer, initialState);
+
+  // Use refs to always have the latest values in async functions
+  const profileRef = useRef<UserProfile | null>(null);
+  const selectedDateRef = useRef(getToday());
+
+  // Keep refs in sync with state
+  useEffect(() => {
+    profileRef.current = state.profile;
+  }, [state.profile]);
+
+  useEffect(() => {
+    selectedDateRef.current = state.selectedDate;
+  }, [state.selectedDate]);
 
   // Initialize on mount
   useEffect(() => {
@@ -121,10 +135,15 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
       if (onboarded) {
         const profile = await db.getUserProfile();
         if (profile) {
+          profileRef.current = profile;
           dispatch({ type: 'SET_PROFILE', payload: profile });
           const targets = calculateNutritionTargets(profile);
           dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
-          await loadMealsForDate(getToday());
+          // Use profile.id directly instead of stale state
+          const meals = await db.getMealsForDate(profile.id, getToday());
+          dispatch({ type: 'SET_MEALS', payload: meals });
+          const nutrition = await db.getDailyNutrition(profile.id, getToday());
+          dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
         }
       }
     } catch (error) {
@@ -137,6 +156,7 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
   async function loadProfile() {
     const profile = await db.getUserProfile();
     if (profile) {
+      profileRef.current = profile;
       dispatch({ type: 'SET_PROFILE', payload: profile });
       const targets = calculateNutritionTargets(profile);
       dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
@@ -145,14 +165,15 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
 
   async function saveProfileAction(profile: UserProfile) {
     await db.saveUserProfile(profile);
+    profileRef.current = profile;
     dispatch({ type: 'SET_PROFILE', payload: profile });
     const targets = calculateNutritionTargets(profile);
     dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
   }
 
   async function loadMealsForDate(date: string) {
-    if (!state.profile && !(await storage.getUserId())) return;
-    const userId = state.profile?.id || (await storage.getUserId()) || '';
+    const userId = profileRef.current?.id || (await storage.getUserId()) || '';
+    if (!userId) return;
     const meals = await db.getMealsForDate(userId, date);
     dispatch({ type: 'SET_MEALS', payload: meals });
     const nutrition = await db.getDailyNutrition(userId, date);
@@ -160,17 +181,24 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
   }
 
   function setSelectedDate(date: string) {
+    selectedDateRef.current = date;
     dispatch({ type: 'SET_DATE', payload: date });
     loadMealsForDate(date);
   }
 
   async function logMeal(mealType: MealType, items: MealFoodItem[]) {
-    if (!state.profile) return;
+    // Use ref to avoid stale closure - this is the key fix
+    const profile = profileRef.current;
+    const date = selectedDateRef.current;
+    if (!profile) {
+      console.error('logMeal: No profile found, cannot save meal');
+      return;
+    }
     const now = new Date().toISOString();
     const meal: Meal = {
       id: generateId(),
-      userId: state.profile.id,
-      date: state.selectedDate,
+      userId: profile.id,
+      date,
       mealType,
       items,
       totalNutrition: aggregateNutrition(items),
@@ -179,16 +207,18 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
     };
     await db.saveMeal(meal);
     dispatch({ type: 'ADD_MEAL', payload: meal });
-    // Refresh nutrition totals
-    const nutrition = await db.getDailyNutrition(state.profile.id, state.selectedDate);
+    // Refresh nutrition totals from DB
+    const nutrition = await db.getDailyNutrition(profile.id, date);
     dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
   }
 
   async function deleteMealAction(mealId: string) {
     await db.deleteMeal(mealId);
     dispatch({ type: 'REMOVE_MEAL', payload: mealId });
-    if (state.profile) {
-      const nutrition = await db.getDailyNutrition(state.profile.id, state.selectedDate);
+    const profile = profileRef.current;
+    const date = selectedDateRef.current;
+    if (profile) {
+      const nutrition = await db.getDailyNutrition(profile.id, date);
       dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
     }
   }
@@ -209,10 +239,21 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
     await db.saveUserProfile(profile);
     await storage.setOnboardingComplete(true);
     await storage.setUserId(profile.id);
+    profileRef.current = profile;
     dispatch({ type: 'SET_PROFILE', payload: profile });
     dispatch({ type: 'SET_ONBOARDING', payload: true });
     const targets = calculateNutritionTargets(profile);
     dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
+  }
+
+  async function reloadToday() {
+    const profile = profileRef.current;
+    if (!profile) return;
+    const today = getToday();
+    const meals = await db.getMealsForDate(profile.id, today);
+    dispatch({ type: 'SET_MEALS', payload: meals });
+    const nutrition = await db.getDailyNutrition(profile.id, today);
+    dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
   }
 
   return (
@@ -227,6 +268,7 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
         deleteMeal: deleteMealAction,
         refreshSuggestions,
         completeOnboarding,
+        reloadToday,
       }}
     >
       {children}

@@ -42,7 +42,7 @@ export default function LogMealScreen() {
       Alert.alert(
         'Meal Logged!',
         `${MEAL_TYPE_LABELS[selectedMealType]} has been logged successfully.`,
-        [{ text: 'OK', onPress: () => { setItems([]); router.push('/(tabs)'); } }]
+        [{ text: 'OK', onPress: () => { setItems([]); router.navigate('/(tabs)'); } }]
       );
     } catch (error) {
       Alert.alert('Error', 'Failed to log meal. Please try again.');

@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import { useMealContext } from '../../contexts/MealContext';
 import NutritionBar from '../../components/NutritionBar';
 import MealCard from '../../components/MealCard';
@@ -11,8 +11,15 @@ import { calculateProgress } from '../../utils/nutritionCalc';
 import { COLORS } from '../../utils/constants';
 
 export default function DashboardScreen() {
-  const { state, deleteMeal } = useMealContext();
+  const { state, deleteMeal, reloadToday } = useMealContext();
   const { meals, dailyNutrition, targetNutrition, suggestions, nutritionFlags, selectedDate, profile } = state;
+
+  // Reload meals from DB every time this tab becomes visible
+  useFocusEffect(
+    useCallback(() => {
+      reloadToday();
+    }, [])
+  );
 
   const calProgress = calculateProgress(targetNutrition.calories, dailyNutrition.calories);
   const loggedMealTypes = meals.map((m) => m.mealType);
