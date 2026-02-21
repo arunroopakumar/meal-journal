@@ -187,13 +187,26 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function logMeal(mealType: MealType, items: MealFoodItem[]) {
-    // Use ref to avoid stale closure - this is the key fix
-    const profile = profileRef.current;
-    const date = selectedDateRef.current;
+    // Try ref first, then fall back to loading from DB
+    let profile = profileRef.current;
     if (!profile) {
-      console.error('logMeal: No profile found, cannot save meal');
-      return;
+      // Fallback: load profile directly from DB
+      profile = await db.getUserProfile();
+      if (profile) {
+        profileRef.current = profile;
+        dispatch({ type: 'SET_PROFILE', payload: profile });
+      }
     }
+    if (!profile) {
+      // Last resort: try to get userId from storage
+      const userId = await storage.getUserId();
+      if (!userId) {
+        throw new Error('No profile found. Please complete setup first.');
+      }
+      // Create a minimal profile reference for saving
+      profile = { id: userId } as UserProfile;
+    }
+    const date = selectedDateRef.current || getToday();
     const now = new Date().toISOString();
     const meal: Meal = {
       id: generateId(),
@@ -236,18 +249,35 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
   }
 
   async function completeOnboarding(profile: UserProfile) {
+    // Save to DB and storage first
     await db.saveUserProfile(profile);
     await storage.setOnboardingComplete(true);
     await storage.setUserId(profile.id);
+    // Set ref BEFORE dispatching to ensure it's available immediately
     profileRef.current = profile;
+    selectedDateRef.current = getToday();
+    // Now update React state
     dispatch({ type: 'SET_PROFILE', payload: profile });
     dispatch({ type: 'SET_ONBOARDING', payload: true });
     const targets = calculateNutritionTargets(profile);
     dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
+    // Load today's meals (empty, but initializes the state properly)
+    const meals = await db.getMealsForDate(profile.id, getToday());
+    dispatch({ type: 'SET_MEALS', payload: meals });
+    const nutrition = await db.getDailyNutrition(profile.id, getToday());
+    dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
   }
 
   async function reloadToday() {
-    const profile = profileRef.current;
+    let profile = profileRef.current;
+    if (!profile) {
+      // Fallback: load from DB
+      profile = await db.getUserProfile();
+      if (profile) {
+        profileRef.current = profile;
+        dispatch({ type: 'SET_PROFILE', payload: profile });
+      }
+    }
     if (!profile) return;
     const today = getToday();
     const meals = await db.getMealsForDate(profile.id, today);
