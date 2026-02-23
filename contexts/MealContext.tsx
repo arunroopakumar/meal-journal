@@ -144,6 +144,11 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
           dispatch({ type: 'SET_MEALS', payload: meals });
           const nutrition = await db.getDailyNutrition(profile.id, getToday());
           dispatch({ type: 'SET_DAILY_NUTRITION', payload: nutrition });
+        } else {
+          // Profile missing from DB (likely due to previous silent DB failures).
+          // Reset onboarding so the user can re-enter their details.
+          await storage.setOnboardingComplete(false);
+          dispatch({ type: 'SET_ONBOARDING', payload: false });
         }
       }
     } catch (error) {
