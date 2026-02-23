@@ -130,16 +130,23 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
   async function initializeApp() {
     try {
       const onboarded = await storage.isOnboardingComplete();
-      dispatch({ type: 'SET_ONBOARDING', payload: onboarded });
 
       if (onboarded) {
-        const profile = await db.getUserProfile();
+        // Try to load profile from DB. If it throws or returns null,
+        // the profile was never saved (old DB bug). Reset onboarding.
+        let profile: UserProfile | null = null;
+        try {
+          profile = await db.getUserProfile();
+        } catch (dbError) {
+          console.error('DB error loading profile:', dbError);
+        }
+
         if (profile) {
+          dispatch({ type: 'SET_ONBOARDING', payload: true });
           profileRef.current = profile;
           dispatch({ type: 'SET_PROFILE', payload: profile });
           const targets = calculateNutritionTargets(profile);
           dispatch({ type: 'SET_TARGET_NUTRITION', payload: targets });
-          // Use profile.id directly instead of stale state
           const meals = await db.getMealsForDate(profile.id, getToday());
           dispatch({ type: 'SET_MEALS', payload: meals });
           const nutrition = await db.getDailyNutrition(profile.id, getToday());
@@ -147,12 +154,18 @@ export function MealProvider({ children }: { children: React.ReactNode }) {
         } else {
           // Profile missing from DB (likely due to previous silent DB failures).
           // Reset onboarding so the user can re-enter their details.
+          console.log('Profile not found in DB, resetting onboarding');
           await storage.setOnboardingComplete(false);
           dispatch({ type: 'SET_ONBOARDING', payload: false });
         }
+      } else {
+        dispatch({ type: 'SET_ONBOARDING', payload: false });
       }
     } catch (error) {
       console.error('Failed to initialize app:', error);
+      // If anything goes wrong, send user to onboarding
+      await storage.setOnboardingComplete(false);
+      dispatch({ type: 'SET_ONBOARDING', payload: false });
     } finally {
       dispatch({ type: 'SET_LOADING', payload: false });
     }
