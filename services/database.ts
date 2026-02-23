@@ -6,20 +6,20 @@ import { generateId, getToday } from '../utils/dateUtils';
 
 const DB_NAME = 'mealjournal.db';
 
-let db: SQLite.SQLiteDatabase | null = null;
+let database: SQLite.SQLiteDatabase | null = null;
 
 export async function getDatabase(): Promise<SQLite.SQLiteDatabase> {
-  if (!db) {
-    db = await SQLite.openDatabaseAsync(DB_NAME);
-    await initializeDatabase(db);
+  if (!database) {
+    database = await SQLite.openDatabaseAsync(DB_NAME);
+    await initializeDatabase(database);
   }
-  return db;
+  return database;
 }
 
-async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void> {
-  await database.execAsync(`
-    PRAGMA journal_mode = WAL;
+async function initializeDatabase(db: SQLite.SQLiteDatabase): Promise<void> {
+  await db.execAsync(`PRAGMA journal_mode = WAL`);
 
+  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS user_profile (
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
@@ -38,8 +38,10 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       onboarding_complete INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
-    );
+    )
+  `);
 
+  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS meals (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -48,8 +50,10 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (user_id) REFERENCES user_profile(id)
-    );
+    )
+  `);
 
+  await db.execAsync(`
     CREATE TABLE IF NOT EXISTS meal_items (
       id TEXT PRIMARY KEY,
       meal_id TEXT NOT NULL,
@@ -67,67 +71,49 @@ async function initializeDatabase(database: SQLite.SQLiteDatabase): Promise<void
       calcium REAL NOT NULL DEFAULT 0,
       vitamin_c REAL NOT NULL DEFAULT 0,
       FOREIGN KEY (meal_id) REFERENCES meals(id) ON DELETE CASCADE
-    );
-
-    CREATE TABLE IF NOT EXISTS meal_templates (
-      id TEXT PRIMARY KEY,
-      user_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      meal_type TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      FOREIGN KEY (user_id) REFERENCES user_profile(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS template_items (
-      id TEXT PRIMARY KEY,
-      template_id TEXT NOT NULL,
-      food_id TEXT NOT NULL,
-      food_name TEXT NOT NULL,
-      servings REAL NOT NULL,
-      serving_size REAL NOT NULL,
-      serving_unit TEXT NOT NULL,
-      FOREIGN KEY (template_id) REFERENCES meal_templates(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_meals_date ON meals(date);
-    CREATE INDEX IF NOT EXISTS idx_meals_user_date ON meals(user_id, date);
-    CREATE INDEX IF NOT EXISTS idx_meal_items_meal ON meal_items(meal_id);
+    )
   `);
+
+  await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_meals_date ON meals(date)`);
+  await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_meals_user_date ON meals(user_id, date)`);
+  await db.execAsync(`CREATE INDEX IF NOT EXISTS idx_meal_items_meal ON meal_items(meal_id)`);
 }
 
 // ─── User Profile Operations ───────────────────────────────────────────
 
 export async function saveUserProfile(profile: UserProfile): Promise<void> {
-  const database = await getDatabase();
-  await database.runAsync(
+  const db = await getDatabase();
+  await db.runAsync(
     `INSERT OR REPLACE INTO user_profile
       (id, name, age, gender, height, weight, activity_level, dietary_preference, goal,
        calorie_target, protein_target, carbs_target, fat_target, fiber_target,
        onboarding_complete, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-    profile.id,
-    profile.name,
-    profile.age,
-    profile.gender,
-    profile.height,
-    profile.weight,
-    profile.activityLevel,
-    profile.dietaryPreference,
-    profile.goal,
-    profile.calorieTarget,
-    profile.proteinTarget,
-    profile.carbsTarget,
-    profile.fatTarget,
-    profile.fiberTarget,
-    profile.onboardingComplete ? 1 : 0,
-    profile.createdAt,
-    profile.updatedAt
+    [
+      profile.id,
+      profile.name,
+      profile.age,
+      profile.gender,
+      profile.height,
+      profile.weight,
+      profile.activityLevel,
+      profile.dietaryPreference,
+      profile.goal,
+      profile.calorieTarget,
+      profile.proteinTarget,
+      profile.carbsTarget,
+      profile.fatTarget,
+      profile.fiberTarget,
+      profile.onboardingComplete ? 1 : 0,
+      profile.createdAt,
+      profile.updatedAt,
+    ]
   );
 }
 
 export async function getUserProfile(): Promise<UserProfile | null> {
-  const database = await getDatabase();
-  const row = await database.getFirstAsync<Record<string, unknown>>(
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<Record<string, unknown>>(
     'SELECT * FROM user_profile LIMIT 1'
   );
   if (!row) return null;
@@ -159,63 +145,59 @@ function mapRowToProfile(row: Record<string, unknown>): UserProfile {
 // ─── Meal Operations ────────────────────────────────────────────────────
 
 export async function saveMeal(meal: Meal): Promise<void> {
-  const database = await getDatabase();
+  const db = await getDatabase();
   const now = new Date().toISOString();
 
-  await database.runAsync(
+  await db.runAsync(
     `INSERT OR REPLACE INTO meals (id, user_id, date, meal_type, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?)`,
-    meal.id,
-    meal.userId,
-    meal.date,
-    meal.mealType,
-    meal.createdAt || now,
-    now
+    [meal.id, meal.userId, meal.date, meal.mealType, meal.createdAt || now, now]
   );
 
   // Delete existing items for this meal (to handle updates)
-  await database.runAsync('DELETE FROM meal_items WHERE meal_id = ?', meal.id);
+  await db.runAsync('DELETE FROM meal_items WHERE meal_id = ?', [meal.id]);
 
   // Insert all items
   for (const item of meal.items) {
-    await database.runAsync(
+    await db.runAsync(
       `INSERT INTO meal_items
         (id, meal_id, food_id, food_name, servings, serving_size, serving_unit,
          calories, protein, carbs, fat, fiber, iron, calcium, vitamin_c)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-      item.id,
-      meal.id,
-      item.foodItem.id,
-      item.foodItem.name,
-      item.servings,
-      item.foodItem.servingSize,
-      item.foodItem.servingUnit,
-      item.totalNutrition.calories,
-      item.totalNutrition.protein,
-      item.totalNutrition.carbs,
-      item.totalNutrition.fat,
-      item.totalNutrition.fiber,
-      item.totalNutrition.iron,
-      item.totalNutrition.calcium,
-      item.totalNutrition.vitaminC
+      [
+        item.id,
+        meal.id,
+        item.foodItem.id,
+        item.foodItem.name,
+        item.servings,
+        item.foodItem.servingSize,
+        item.foodItem.servingUnit,
+        item.totalNutrition.calories,
+        item.totalNutrition.protein,
+        item.totalNutrition.carbs,
+        item.totalNutrition.fat,
+        item.totalNutrition.fiber,
+        item.totalNutrition.iron,
+        item.totalNutrition.calcium,
+        item.totalNutrition.vitaminC,
+      ]
     );
   }
 }
 
 export async function getMealsForDate(userId: string, date: string): Promise<Meal[]> {
-  const database = await getDatabase();
+  const db = await getDatabase();
 
-  const mealRows = await database.getAllAsync<Record<string, unknown>>(
+  const mealRows = await db.getAllAsync<Record<string, unknown>>(
     'SELECT * FROM meals WHERE user_id = ? AND date = ? ORDER BY meal_type',
-    userId,
-    date
+    [userId, date]
   );
 
   const meals: Meal[] = [];
   for (const mealRow of mealRows) {
-    const itemRows = await database.getAllAsync<Record<string, unknown>>(
+    const itemRows = await db.getAllAsync<Record<string, unknown>>(
       'SELECT * FROM meal_items WHERE meal_id = ?',
-      mealRow.id as string
+      [mealRow.id as string]
     );
 
     const items: MealFoodItem[] = itemRows.map((itemRow) => ({
@@ -260,17 +242,17 @@ export async function getMealsForDate(userId: string, date: string): Promise<Mea
 }
 
 export async function deleteMeal(mealId: string): Promise<void> {
-  const database = await getDatabase();
-  await database.runAsync('DELETE FROM meal_items WHERE meal_id = ?', mealId);
-  await database.runAsync('DELETE FROM meals WHERE id = ?', mealId);
+  const db = await getDatabase();
+  await db.runAsync('DELETE FROM meal_items WHERE meal_id = ?', [mealId]);
+  await db.runAsync('DELETE FROM meals WHERE id = ?', [mealId]);
 }
 
 export async function getDailyNutrition(
   userId: string,
   date: string
 ): Promise<NutritionInfo> {
-  const database = await getDatabase();
-  const row = await database.getFirstAsync<Record<string, unknown>>(
+  const db = await getDatabase();
+  const row = await db.getFirstAsync<Record<string, unknown>>(
     `SELECT
       COALESCE(SUM(mi.calories), 0) as calories,
       COALESCE(SUM(mi.protein), 0) as protein,
@@ -283,8 +265,7 @@ export async function getDailyNutrition(
     FROM meals m
     JOIN meal_items mi ON mi.meal_id = m.id
     WHERE m.user_id = ? AND m.date = ?`,
-    userId,
-    date
+    [userId, date]
   );
 
   if (!row) {
@@ -311,8 +292,8 @@ export async function getNutritionHistory(
   startDate: string,
   endDate: string
 ): Promise<Map<string, NutritionInfo>> {
-  const database = await getDatabase();
-  const rows = await database.getAllAsync<Record<string, unknown>>(
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT
       m.date,
       COALESCE(SUM(mi.calories), 0) as calories,
@@ -328,9 +309,7 @@ export async function getNutritionHistory(
     WHERE m.user_id = ? AND m.date >= ? AND m.date <= ?
     GROUP BY m.date
     ORDER BY m.date`,
-    userId,
-    startDate,
-    endDate
+    [userId, startDate, endDate]
   );
 
   const history = new Map<string, NutritionInfo>();
@@ -354,16 +333,15 @@ export async function getNutritionHistory(
  * Get recent food items used by the user (for quick re-logging)
  */
 export async function getRecentFoods(userId: string, limit: number = 20): Promise<string[]> {
-  const database = await getDatabase();
-  const rows = await database.getAllAsync<Record<string, unknown>>(
+  const db = await getDatabase();
+  const rows = await db.getAllAsync<Record<string, unknown>>(
     `SELECT DISTINCT mi.food_name
      FROM meal_items mi
      JOIN meals m ON m.id = mi.meal_id
      WHERE m.user_id = ?
      ORDER BY m.created_at DESC
      LIMIT ?`,
-    userId,
-    limit
+    [userId, limit]
   );
   return rows.map((r) => r.food_name as string);
 }
