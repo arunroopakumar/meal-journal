@@ -1,7 +1,8 @@
 import React from 'react';
-import { Tabs } from 'expo-router';
+import { Tabs, Redirect } from 'expo-router';
 import { Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useMealContext } from '../../contexts/MealContext';
 import { COLORS } from '../../utils/constants';
 
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
@@ -19,8 +20,14 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 }
 
 export default function TabLayout() {
+  const { state } = useMealContext();
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 8);
+
+  // If profile is missing, redirect to onboarding to re-setup
+  if (!state.isLoading && !state.onboardingComplete) {
+    return <Redirect href="/onboarding" />;
+  }
 
   return (
     <Tabs
