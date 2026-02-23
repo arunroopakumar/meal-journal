@@ -3,6 +3,7 @@ import {
   View, Text, StyleSheet, ScrollView, TouchableOpacity,
   TextInput, Alert,
 } from 'react-native';
+import { router } from 'expo-router';
 import { useMealContext } from '../../contexts/MealContext';
 import NutritionBar from '../../components/NutritionBar';
 import {
@@ -25,8 +26,26 @@ export default function ProfileScreen() {
 
   if (!profile) {
     return (
-      <View style={styles.container}>
-        <Text style={styles.emptyText}>Profile not set up yet.</Text>
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', padding: 24 }]}>
+        <Text style={{ fontSize: 48, marginBottom: 16 }}>👤</Text>
+        <Text style={[styles.emptyText, { marginTop: 0, marginBottom: 12, fontSize: 18, fontWeight: '600' }]}>
+          Profile not set up yet
+        </Text>
+        <Text style={{ color: COLORS.textSecondary, textAlign: 'center', marginBottom: 24, lineHeight: 20 }}>
+          Complete the setup to start tracking your meals and nutrition.
+        </Text>
+        <TouchableOpacity
+          style={{
+            backgroundColor: COLORS.primary,
+            paddingVertical: 14,
+            paddingHorizontal: 32,
+            borderRadius: 12,
+          }}
+          onPress={() => router.replace('/onboarding')}
+          activeOpacity={0.8}
+        >
+          <Text style={{ color: '#fff', fontSize: 16, fontWeight: '600' }}>Set Up Profile</Text>
+        </TouchableOpacity>
       </View>
     );
   }

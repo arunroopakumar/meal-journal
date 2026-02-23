@@ -1,5 +1,5 @@
-import React from 'react';
-import { Tabs, Redirect } from 'expo-router';
+import React, { useEffect } from 'react';
+import { Tabs, router } from 'expo-router';
 import { Text, StyleSheet } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useMealContext } from '../../contexts/MealContext';
@@ -24,10 +24,14 @@ export default function TabLayout() {
   const insets = useSafeAreaInsets();
   const bottomPadding = Math.max(insets.bottom, 8);
 
-  // If profile is missing, redirect to onboarding to re-setup
-  if (!state.isLoading && !state.onboardingComplete) {
-    return <Redirect href="/onboarding" />;
-  }
+  // If no profile exists after loading completes, redirect to onboarding.
+  // Uses router.replace imperatively (not <Redirect>) because returning
+  // a non-navigator component from a layout breaks expo-router.
+  useEffect(() => {
+    if (!state.isLoading && !state.profile) {
+      router.replace('/onboarding');
+    }
+  }, [state.isLoading, state.profile]);
 
   return (
     <Tabs
